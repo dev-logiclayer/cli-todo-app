@@ -1,4 +1,3 @@
-# .github/workflows/build-release.yml
 name: Build and Release
 
 on:
@@ -12,50 +11,71 @@ jobs:
     
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: ubuntu-latest
+            arch: amd64
+            platform: linux
             artifact_name: todo-app
-            asset_name: todo-app-linux-amd64
+          - os: ubuntu-latest
+            arch: arm64
+            platform: linux
+            artifact_name: todo-app
           - os: macos-latest
+            arch: amd64
+            platform: macos
             artifact_name: todo-app
-            asset_name: todo-app-macos-amd64
           - os: windows-latest
+            arch: amd64
+            platform: windows
             artifact_name: todo-app.exe
-            asset_name: todo-app-windows-amd64.exe
 
     runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install ARM64 Cross-Compiler
+      if: matrix.platform == 'linux' && matrix.arch == 'arm64'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
     - uses: jwlawson/actions-setup-cmake@v2
       with:
         cmake-version: '3.25.x'
 
     - name: Configure CMake
-      run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      run: |
+        if [ "${{ matrix.platform }}" = "linux" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+          -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+        else
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+        fi
+      shell: bash
 
     - name: Build
       run: cmake --build build --config Release
 
-    - name: Prepare (Linux/Mac)
-      if: matrix.os != 'windows-latest'
+    - name: Prepare Artifacts
+      shell: bash
       run: |
-        mkdir -p artifacts
-        cp build/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
-        chmod +x artifacts/${{ matrix.asset_name }}
-
-    - name: Prepare (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        mkdir artifacts
-        copy build\Release\${{ matrix.artifact_name }} artifacts\${{ matrix.asset_name }}
+        mkdir -p out
+        # ফাইল নেমিং কনভেনশন: app-v1.0.0-linux-arm64
+        ASSET_NAME="todo-app-${{ matrix.platform }}-${{ matrix.arch }}"
+        if [ "${{ matrix.platform }}" = "windows" ]; then
+          cp build/Release/${{ matrix.artifact_name }} out/${ASSET_NAME}.exe
+        else
+          cp build/${{ matrix.artifact_name }} out/${ASSET_NAME}
+          chmod +x out/${ASSET_NAME}
+        fi
+        echo "final_asset_name=$(ls out/)" >> $GITHUB_ENV
 
     - uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.asset_name }}
-        path: artifacts/${{ matrix.asset_name }}
+        name: ${{ env.final_asset_name }}
+        path: out/${{ env.final_asset_name }}
 
   release:
     needs: build-and-release
@@ -68,21 +88,23 @@ jobs:
 
     - uses: actions/download-artifact@v4
       with:
-        path: artifacts
+        path: all-artifacts
+        merge-multiple: true
 
-    - name: Get version
-      id: version
+    - name: Set Release Metadata
+      id: meta
       run: |
-        echo "date=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
-        echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        # এখানে আপনি আপনার পছন্দমতো ফরম্যাট সেট করতে পারেন
+        # উদাহরন: v2026.01.04.1234
+        echo "version=v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        echo "friendly_date=$(date +'%B %d, %Y')" >> $GITHUB_OUTPUT
 
     - uses: softprops/action-gh-release@v2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: build-${{ steps.version.outputs.date }}-${{ steps.version.outputs.sha }}
-        name: Build ${{ steps.version.outputs.date }}
-        files: |
-          artifacts/todo-app-linux-amd64/todo-app-linux-amd64
-          artifacts/todo-app-macos-amd64/todo-app-macos-amd64
-          artifacts/todo-app-windows-amd64.exe/todo-app-windows-amd64.exe
+        # রিলিজের নাম এখন হবে "Production Release - January 04, 2026"
+        # ট্যাগের নাম হবে "v20260104-sha"
+        tag_name: ${{ steps.meta.outputs.version }}
+        name: "App Release - ${{ steps.meta.outputs.friendly_date }}"
+        draft: false
+        prerelease: false
+        files: all-artifacts/*
