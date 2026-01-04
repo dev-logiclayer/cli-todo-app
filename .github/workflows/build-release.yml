@@ -29,12 +29,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Check files
-      run: |
-        ls -la
-        ls -la include/ || echo "No include directory"
-        ls -la src/ || echo "No src directory"
-
     - uses: jwlawson/actions-setup-cmake@v2
       with:
         cmake-version: '3.25.x'
