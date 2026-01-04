@@ -11,6 +11,7 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux
           - os: ubuntu-latest
             arch: amd64
             platform: linux
@@ -19,12 +20,22 @@ jobs:
             arch: arm64
             platform: linux
             artifact_name: todo-app
+          # macOS (Intel & Apple Silicon)
           - os: macos-latest
             arch: amd64
             platform: macos
             artifact_name: todo-app
+          - os: macos-latest
+            arch: arm64
+            platform: macos
+            artifact_name: todo-app
+          # Windows (Intel & ARM)
           - os: windows-latest
             arch: amd64
+            platform: windows
+            artifact_name: todo-app.exe
+          - os: windows-latest
+            arch: arm64
             platform: windows
             artifact_name: todo-app.exe
 
@@ -33,7 +44,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install ARM64 Cross-Compiler
+    - name: Install ARM64 Cross-Compiler (Linux)
       if: matrix.platform == 'linux' && matrix.arch == 'arm64'
       run: |
         sudo apt-get update
@@ -49,6 +60,10 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
           -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
           -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+        elif [ "${{ matrix.platform }}" = "macos" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+        elif [ "${{ matrix.platform }}" = "windows" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -A ARM64
         else
           cmake -B build -DCMAKE_BUILD_TYPE=Release
         fi
@@ -61,12 +76,15 @@ jobs:
       shell: bash
       run: |
         mkdir -p out
-        # Using Semantic Versioning naming: app-v1.0.0-linux-amd64
         VERSION=${GITHUB_REF_NAME}
         ASSET_NAME="todo-app-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
         
         if [ "${{ matrix.platform }}" = "windows" ]; then
-          cp build/Release/${{ matrix.artifact_name }} out/${ASSET_NAME}.exe
+          if [ -f "build/Release/${{ matrix.artifact_name }}" ]; then
+            cp build/Release/${{ matrix.artifact_name }} out/${ASSET_NAME}.exe
+          else
+            cp build/${{ matrix.artifact_name }} out/${ASSET_NAME}.exe
+          fi
           echo "artifact_path=out/${ASSET_NAME}.exe" >> $GITHUB_ENV
         else
           cp build/${{ matrix.artifact_name }} out/${ASSET_NAME}
@@ -74,10 +92,20 @@ jobs:
           echo "artifact_path=out/${ASSET_NAME}" >> $GITHUB_ENV
         fi
 
+    - name: Generate Checksum
+      shell: bash
+      run: |
+        cd out
+        FILE_NAME=$(ls)
+        shasum -a 256 $FILE_NAME > ${FILE_NAME}.sha256
+        echo "checksum_path=out/${FILE_NAME}.sha256" >> $GITHUB_ENV
+
     - uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.platform }}-${{ matrix.arch }}
-        path: ${{ env.artifact_path }}
+        path: |
+          ${{ env.artifact_path }}
+          ${{ env.checksum_path }}
 
   release:
     needs: build-and-release
@@ -93,6 +121,12 @@ jobs:
         path: all-artifacts
         merge-multiple: true
 
+    - name: Create Combined Checksums File
+      run: |
+        cd all-artifacts
+        cat *.sha256 > checksums.txt
+        rm *.sha256
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
@@ -101,4 +135,6 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
-        files: all-artifacts/*
+        files: |
+          all-artifacts/*
+          all-artifacts/checksums.txt
