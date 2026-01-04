@@ -1,6 +1,8 @@
+// ==================== src/Task.cpp ====================
 #include "../include/Task.h"
 #include <sstream>
 #include <iomanip>
+#include <vector>
 
 Task::Task(int id, const std::string& title, const std::string& description,
            const std::string& category, const std::string& dueDate, Priority priority)
