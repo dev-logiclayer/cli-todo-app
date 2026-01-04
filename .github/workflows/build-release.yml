@@ -11,7 +11,6 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux
           - os: ubuntu-latest
             arch: amd64
             platform: linux
@@ -21,7 +20,6 @@ jobs:
             platform: linux
             artifact_name: todo-app
           
-          # macOS
           - os: macos-latest
             arch: amd64
             platform: macos
@@ -31,7 +29,6 @@ jobs:
             platform: macos
             artifact_name: todo-app
 
-          # Windows
           - os: windows-latest
             arch: amd64
             platform: windows
@@ -83,7 +80,6 @@ jobs:
         
         if [ "${{ matrix.platform }}" = "windows" ]; then
           FINAL_NAME="${ASSET_NAME}.exe"
-          # Handle Windows build path differences
           if [ -f "build/Release/${{ matrix.artifact_name }}" ]; then
             cp "build/Release/${{ matrix.artifact_name }}" "out/${FINAL_NAME}"
           else
@@ -95,7 +91,7 @@ jobs:
           chmod +x out/${FINAL_NAME}
         fi
 
-        # Generate Checksum
+        # Generate individual checksum
         cd out
         if command -v sha256sum >/dev/null 2>&1; then
           sha256sum "${FINAL_NAME}" > "${FINAL_NAME}.sha256"
@@ -123,10 +119,19 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - uses: actions/download-artifact@v4
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
       with:
         path: all-artifacts
         merge-multiple: true
+
+    - name: Combine Checksums
+      working-directory: all-artifacts
+      run: |
+        # Combine all .sha256 files into one checksums.txt
+        cat *.sha256 > checksums.txt
+        # Remove the individual .sha256 files to keep the release clean
+        rm *.sha256
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -136,4 +141,5 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: true
-        files: all-artifacts/*
+        files: |
+          all-artifacts/*
