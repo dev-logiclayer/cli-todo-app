@@ -2,13 +2,12 @@ name: Build and Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
 
 jobs:
   build-and-release:
-    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]')"
-    
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     strategy:
       matrix:
         include:
@@ -62,20 +61,23 @@ jobs:
       shell: bash
       run: |
         mkdir -p out
-        # ফাইল নেমিং কনভেনশন: app-v1.0.0-linux-arm64
-        ASSET_NAME="todo-app-${{ matrix.platform }}-${{ matrix.arch }}"
+        # Using Semantic Versioning naming: app-v1.0.0-linux-amd64
+        VERSION=${GITHUB_REF_NAME}
+        ASSET_NAME="todo-app-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}"
+        
         if [ "${{ matrix.platform }}" = "windows" ]; then
           cp build/Release/${{ matrix.artifact_name }} out/${ASSET_NAME}.exe
+          echo "artifact_path=out/${ASSET_NAME}.exe" >> $GITHUB_ENV
         else
           cp build/${{ matrix.artifact_name }} out/${ASSET_NAME}
           chmod +x out/${ASSET_NAME}
+          echo "artifact_path=out/${ASSET_NAME}" >> $GITHUB_ENV
         fi
-        echo "final_asset_name=$(ls out/)" >> $GITHUB_ENV
 
     - uses: actions/upload-artifact@v4
       with:
-        name: ${{ env.final_asset_name }}
-        path: out/${{ env.final_asset_name }}
+        name: ${{ matrix.platform }}-${{ matrix.arch }}
+        path: ${{ env.artifact_path }}
 
   release:
     needs: build-and-release
@@ -91,20 +93,12 @@ jobs:
         path: all-artifacts
         merge-multiple: true
 
-    - name: Set Release Metadata
-      id: meta
-      run: |
-        # এখানে আপনি আপনার পছন্দমতো ফরম্যাট সেট করতে পারেন
-        # উদাহরন: v2026.01.04.1234
-        echo "version=v$(date +'%Y%m%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-        echo "friendly_date=$(date +'%B %d, %Y')" >> $GITHUB_OUTPUT
-
-    - uses: softprops/action-gh-release@v2
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
       with:
-        # রিলিজের নাম এখন হবে "Production Release - January 04, 2026"
-        # ট্যাগের নাম হবে "v20260104-sha"
-        tag_name: ${{ steps.meta.outputs.version }}
-        name: "App Release - ${{ steps.meta.outputs.friendly_date }}"
+        tag_name: ${{ github.ref_name }}
+        name: "CLI Todo App ${{ github.ref_name }}"
         draft: false
         prerelease: false
+        generate_release_notes: true
         files: all-artifacts/*
